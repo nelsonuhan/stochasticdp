@@ -5,7 +5,7 @@ long_description = pypandoc.convert('README.md', 'rst')
 
 setuptools.setup(
     name='stochasticdp',
-    version='0.1',
+    version='0.1.1',
     description='''
         A small package for solving finite-horizon, finite-state stochastic
         dynamic programs.
