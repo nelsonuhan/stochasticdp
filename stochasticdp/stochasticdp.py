@@ -60,16 +60,14 @@ class StochasticDP(object):
                                    for nn in self.states)
                     if not (isclose(prob_sum, 1) or
                             isclose(prob_sum, 0, abs_tol=1e-09)):
-                        return False
-
-        # If everything checks out
-        return True
+                        raise ValueError(
+                            "Dynamic program is not well-defined. "
+                            "Check the transition probabilities."
+                        )
 
     def solve(self):
         # Validate the DP
-        if not self.validate():
-            raise ValueError("Dynamic program is not well-defined. "
-                             "Check the transition probabilities.")
+        self.validate()
 
         # Value function
         # value[n, t]
