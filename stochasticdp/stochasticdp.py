@@ -1,16 +1,60 @@
 from math import inf, isclose
 
 
-class FrozenDict(dict):
-    __frozen = False
-
-    def freeze(self):
-        self.__frozen = True
+class TransitionData(dict):
+    def __init__(self, number_of_stages, states, decisions):
+        self.number_of_stages = number_of_stages
+        self.states = set(states)
+        self.decisions = set(decisions)
 
     def __setitem__(self, key, value):
-        if self.__frozen and key not in self:
+        try:
+            m, n, t, x = key
+        except ValueError:
+            raise ValueError('State, stage, or decision missing')
+
+        if ((m not in self.states) or
+                (n not in self.states) or
+                (t >= self.number_of_stages) or
+                (x not in self.decisions)):
             raise KeyError('Invalid state, stage, or decision')
         super().__setitem__(key, value)
+
+    def __getitem__(self, key):
+        try:
+            m, n, t, x = key
+        except ValueError:
+            raise ValueError('Not enough indices')
+
+        if ((m not in self.states) or
+                (n not in self.states) or
+                (t >= self.number_of_stages) or
+                (x not in self.decisions)):
+            raise KeyError('Invalid state, stage, or decision')
+
+        if key not in self:
+            return 0
+        else:
+            return super().__getitem__(key)
+
+
+class StateData(dict):
+    def __init__(self, states):
+        self.states = set(states)
+
+    def __setitem__(self, key, value):
+        if key not in self.states:
+            raise KeyError('Invalid state')
+        super().__setitem__(key, value)
+
+    def __getitem__(self, key):
+        if key not in self.states:
+            raise KeyError('Invalid state')
+
+        if key not in self:
+            return 0
+        else:
+            return super().__getitem__(key)
 
 
 class StochasticDP(object):
@@ -28,53 +72,67 @@ class StochasticDP(object):
             self._sign = -1
 
         # Initialize transition probabilities to 0
-        self.transition = FrozenDict()
-        for t in range(self.number_of_stages - 1):
-            for n in self.states:
-                for nn in self.states:
-                    for x in self.decisions:
-                        self.transition[nn, n, t, x] = 0
-        self.transition.freeze()
+        self.transition = TransitionData(self.number_of_stages,
+                                         self.states,
+                                         self.decisions)
 
         # Initialize contributions to 0
-        self.contribution = FrozenDict()
-        for t in range(self.number_of_stages - 1):
-            for n in self.states:
-                for nn in self.states:
-                    for x in self.decisions:
-                        self.contribution[nn, n, t, x] = 0
-        self.contribution.freeze()
+        self.contribution = TransitionData(self.number_of_stages,
+                                           self.states,
+                                           self.decisions)
 
         # Initialize boundary conditions to 0
-        self.boundary = FrozenDict()
+        self.boundary = StateData(self.states)
         for n in self.states:
             self.boundary[n] = 0
-        self.boundary.freeze()
 
     def validate(self):
         # Transition probabilities for each n, t, x must sum to 1 or 0
         for n in self.states:
             for t in range(self.number_of_stages - 1):
                 for x in self.decisions:
-                    prob_sum = sum(self.transition[nn, n, t, x]
-                                   for nn in self.states)
-                    if not (isclose(prob_sum, 1) or
-                            isclose(prob_sum, 0, abs_tol=1e-09)):
+                    sum_transition = sum(self.transition[nn, n, t, x]
+                                         for nn in self.states)
+                    if not (isclose(sum_transition, 1) or
+                            isclose(sum_transition, 0, abs_tol=1e-09)):
                         raise ValueError(
                             "Dynamic program is not well-defined. "
-                            "Check the transition probabilities."
+                            "Check the transition probabilities "
+                            "from state {0} at stage {1} under decision {2}"
+                            .format(n, t, x)
                         )
 
     def solve(self):
-        # Validate the DP
-        self.validate()
+        # Validate the transition probabilities
+        #    Transition probabilities for each n, t, x must sum to 1 or 0
+        # Create dictionary of allowable decisions
+        allowable_decisions = {}
+        for t in range(self.number_of_stages - 1):
+            for n in self.states:
+                for x in self.decisions:
+                    sum_transition = sum(self.transition[nn, n, t, x]
+                                         for nn in self.states)
+                    if isclose(sum_transition, 1):
+                        try:
+                            allowable_decisions[t, n].append(x)
+                        except KeyError:
+                            allowable_decisions[t, n] = [x]
+                    elif isclose(sum_transition, 0, abs_tol=1e-09):
+                        pass
+                    else:
+                        raise ValueError(
+                            "Dynamic program is not well-defined. "
+                            "Check the transition probabilities "
+                            "from state {0} at stage {1} under decision {2}"
+                            .format(n, t, x)
+                        )
 
         # Value function
-        # value[n, t]
+        # value[t, n]
         value = {}
 
         # Policy
-        # policy[n, t]
+        # policy[t, n]
         policy = {}
 
         # Boundary conditions
@@ -84,18 +142,24 @@ class StochasticDP(object):
         # Solve backwards
         for t in range(self.number_of_stages - 2, -1, -1):
             for n in self.states:
-                value[t, n] = self._sign * inf
-                policy[t, n] = None
-                for x in self.decisions:
-                    if isclose(sum(self.transition[nn, n, t, x]
-                                   for nn in self.states), 1):
-                        temp_value = sum(self.transition[nn, n, t, x] *
-                                         (self.contribution[nn, n, t, x] +
-                                          value[t + 1, nn])
-                                         for nn in self.states
-                                         if self.transition[nn, n, t, x] > 0)
-                        if self._sign * temp_value < self._sign * value[t, n]:
-                            value[t, n] = temp_value
-                            policy[t, n] = x
+                value_decision = {}
+                for x in allowable_decisions[t, n]:
+                    value_decision[x] = sum(
+                        self.transition[nn, n, t, x] *
+                        (self.contribution[nn, n, t, x] +
+                         value[t + 1, nn])
+                        for nn in self.states
+                        if self.transition[nn, n, t, x] > 0
+                    )
+
+                if self.minimize:
+                    value[t, n] = min(value_decision.values())
+                else:
+                    value[t, n] = max(value_decision.values())
+
+                policy[t, n] = set(
+                    x for x in allowable_decisions[t, n]
+                    if isclose(value_decision[x], value[t, n])
+                )
 
         return value, policy
