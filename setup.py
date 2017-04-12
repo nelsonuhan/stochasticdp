@@ -5,9 +5,9 @@ long_description = pypandoc.convert('README.md', 'rst')
 
 setuptools.setup(
     name='stochasticdp',
-    version='0.1.1',
+    version='0.2',
     description='''
-        A small package for solving finite-horizon, finite-state stochastic
+        A simple implementation of backwards induction for solving finite-horizon, finite-state stochastic
         dynamic programs.
     ''',
     long_description=long_description,

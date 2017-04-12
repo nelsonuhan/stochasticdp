@@ -1,6 +1,6 @@
 # stochasticdp
 
-This package solves finite-horizon, finite-space stochastic dynamic programs.
+A simple implementation of backwards induction for solving finite-horizon, finite-space stochastic dynamic programs.
 
 ## Installation
 
