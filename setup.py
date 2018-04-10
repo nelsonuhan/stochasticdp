@@ -8,7 +8,7 @@ except ImportError:
 
 setuptools.setup(
     name='stochasticdp',
-    version='0.3.1',
+    version='0.4',
     description='''
         A simple implementation of backwards induction for solving finite-horizon, finite-state stochastic
         dynamic programs.
