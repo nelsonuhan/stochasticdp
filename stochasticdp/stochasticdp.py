@@ -11,24 +11,31 @@ class TransitionData(dict):
         try:
             m, n, t, x = key
         except ValueError:
-            raise ValueError('Incorrect number of indices')
+            if len(key) != 4:
+                raise ValueError('Incorrect number of indices')
+            else:
+                raise
 
         if ((m not in self.states) or
                 (n not in self.states) or
-                (t >= self.number_of_stages) or
+                (t not in range(self.number_of_stages)) or
                 (x not in self.decisions)):
             raise KeyError('Invalid state, stage, or decision')
+
         super().__setitem__(key, value)
 
     def __getitem__(self, key):
         try:
             m, n, t, x = key
         except ValueError:
-            raise ValueError('Incorrect number of indices')
+            if len(key) != 4:
+                raise ValueError('Incorrect number of indices')
+            else:
+                raise
 
         if ((m not in self.states) or
                 (n not in self.states) or
-                (t >= self.number_of_stages) or
+                (t not in range(self.number_of_stages)) or
                 (x not in self.decisions)):
             raise KeyError('Invalid state, stage, or decision')
 
@@ -85,10 +92,13 @@ class StageStateData(dict):
         try:
             t, n = key
         except ValueError:
-            raise ValueError('Incorrect number of indices')
+            if len(key) != 2:
+                raise ValueError('Incorrect number of indices')
+            else:
+                raise
 
         if ((n not in self.states) or
-                (t >= self.number_of_stages)):
+                (t not in range(self.number_of_stages))):
             raise KeyError('Invalid stage or state')
         super().__setitem__(key, value)
 
@@ -96,10 +106,13 @@ class StageStateData(dict):
         try:
             t, n = key
         except ValueError:
-            raise ValueError('Incorrect number of indices')
+            if len(key) != 2:
+                raise ValueError('Incorrect number of indices')
+            else:
+                raise
 
         if ((n not in self.states) or
-                (t >= self.number_of_stages)):
+                (t not in range(self.number_of_stages))):
             raise KeyError('Invalid stage or state')
 
         if key not in self:
@@ -157,23 +170,22 @@ class StochasticDP(object):
 
     def solve(self):
         # Validate the transition probabilities
-        #    Transition probabilities for each n, t, x must sum to 1 or 0
+        # Transition probabilities for each n, t, x must sum to 1 or 0
         # Create dictionary of allowable decisions
-        allowable_decisions = StageStateData(self.number_of_stages, self.states)
+        allowable_decisions = StageStateData(self.number_of_stages,
+                                             self.states)
         for t in range(self.number_of_stages - 1):
             for n in self.states:
                 for x in self.decisions:
-                    sum_probability = sum(
-                        self.probability[nn, n, t, x]
-                        for nn in self.states
-                        if self.probability[nn, n, t, x]
-                    )
+                    sum_probability = sum(self.probability[m, n, t, x]
+                                          for m in self.states
+                                          if self.probability[m, n, t, x])
 
                     if isclose(sum_probability, 1):
-                        if allowable_decisions[t, n]:
-                            allowable_decisions[t, n].append(x)
-                        else:
+                        if allowable_decisions[t, n] is None:
                             allowable_decisions[t, n] = [x]
+                        else:
+                            allowable_decisions[t, n].append(x)
                     elif isclose(sum_probability, 0, abs_tol=1e-09):
                         pass
                     else:
@@ -208,15 +220,21 @@ class StochasticDP(object):
         for t in range(self.number_of_stages - 2, -1, -1):
             for n in self.states:
 
-                if allowable_decisions[t, n]:
+                if allowable_decisions[t, n] is None:
+                    if self.minimize:
+                        value[t, n] = +inf
+                    else:
+                        value[t, n] = -inf
+
+                    policy[t, n] = None
+                else:
                     value_decision = {}
                     for x in allowable_decisions[t, n]:
                         value_decision[x] = sum(
-                            self.probability[nn, n, t, x] *
-                            (self.contribution[nn, n, t, x] +
-                             value[t + 1, nn])
-                            for nn in self.states
-                            if self.probability[nn, n, t, x]
+                            self.probability[m, n, t, x] *
+                            (self.contribution[m, n, t, x] + value[t + 1, m])
+                            for m in self.states
+                            if self.probability[m, n, t, x]
                         )
 
                     if self.minimize:
@@ -229,12 +247,5 @@ class StochasticDP(object):
                         if isclose(value_decision[x], value[t, n])
                     )
 
-                else:
-                    if self.minimize:
-                        value[t, n] = +inf
-                    else:
-                        value[t, n] = -inf
-
-                    policy[t, n] = None
 
         return value, policy
