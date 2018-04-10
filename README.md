@@ -36,9 +36,10 @@ You only need to define probabilities and contributions for transitions that occ
 You can use the following helper functions to populate these dictionaries:
 
 ```python
-dp.add_transition(stage=t, from_state=n, decision=x, to_state=m,
-                  probability=p, contribution=c)
+# This sets dp.probability[m, n, t, x] = p and dp.contribution[m, n, t, x] = c
+dp.add_transition(stage=t, from_state=n, decision=x, to_state=m, probability=p, contribution=c)
 
+# This sets dp.boundary[n] = v
 dp.boundary(state=n, value=v)
 ```
 
