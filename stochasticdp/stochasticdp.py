@@ -1,5 +1,5 @@
 from math import inf, isclose
-
+from warnings import warn
 
 class TransitionData(dict):
     def __init__(self, number_of_stages, states, decisions):
@@ -11,7 +11,7 @@ class TransitionData(dict):
         try:
             m, n, t, x = key
         except ValueError:
-            raise ValueError('State, stage, or decision missing')
+            raise ValueError('Incorrect number of indices')
 
         if ((m not in self.states) or
                 (n not in self.states) or
@@ -24,7 +24,7 @@ class TransitionData(dict):
         try:
             m, n, t, x = key
         except ValueError:
-            raise ValueError('Not enough indices')
+            raise ValueError('Incorrect number of indices')
 
         if ((m not in self.states) or
                 (n not in self.states) or
@@ -66,8 +66,17 @@ class StateData(dict):
         else:
             return super().__getitem__(key)
 
+    def __repr__(self):
+        entries = []
+        for n, v in sorted(self.items()):
+            entries.append(
+                " (state: {0}): {1}".format(n, v)
+            )
+        string = '{' + '\n'.join(entries).strip() + '}'
+        return string
 
-class ValueToGoData(dict):
+
+class StageStateData(dict):
     def __init__(self, number_of_stages, states):
         self.number_of_stages = number_of_stages
         self.states = set(states)
@@ -76,7 +85,7 @@ class ValueToGoData(dict):
         try:
             t, n = key
         except ValueError:
-            raise ValueError('Stage or state missing')
+            raise ValueError('Incorrect number of indices')
 
         if ((n not in self.states) or
                 (t >= self.number_of_stages)):
@@ -87,7 +96,7 @@ class ValueToGoData(dict):
         try:
             t, n = key
         except ValueError:
-            raise ValueError('Not enough indices')
+            raise ValueError('Incorrect number of indices')
 
         if ((n not in self.states) or
                 (t >= self.number_of_stages)):
@@ -100,7 +109,7 @@ class ValueToGoData(dict):
 
     def __repr__(self):
         entries = []
-        for (t, n), v in self.items():
+        for (t, n), v in sorted(self.items()):
             entries.append(" (stage: {0}, state: {1}): {2}".format(t, n, v))
         string = '{' + '\n'.join(entries).strip() + '}'
         return string
@@ -113,12 +122,6 @@ class StochasticDP(object):
         self.states = states
         self.decisions = decisions
         self.minimize = minimize
-
-        # Set comparison direction based on minimize/maximize
-        if self.minimize:
-            self._sign = 1
-        else:
-            self._sign = -1
 
         # Initialize transition probabilities
         self.probability = TransitionData(self.number_of_stages,
@@ -135,17 +138,28 @@ class StochasticDP(object):
 
     def add_transition(self, stage, from_state, decision, to_state,
                        probability, contribution):
+        if (self.probability[to_state, from_state, stage, decision] or
+                self.contribution[to_state, from_state, stage, decision]):
+            warn("The transition from state {0} to state {1} in stage {2} "
+                 "under decision {3} is already defined. You are overwriting "
+                 "this transition data"
+                 .format(from_state, to_state, stage, decision))
+
         self.probability[to_state, from_state, stage, decision] = probability
         self.contribution[to_state, from_state, stage, decision] = contribution
 
     def add_boundary(self, state, value):
+        if self.boundary[state]:
+            warn("The boundary condition at state {0} is already defined. "
+                 "You are overwriting this boundary condition"
+                 .format(state))
         self.boundary[state] = value
 
     def solve(self):
         # Validate the transition probabilities
         #    Transition probabilities for each n, t, x must sum to 1 or 0
         # Create dictionary of allowable decisions
-        allowable_decisions = {}
+        allowable_decisions = StageStateData(self.number_of_stages, self.states)
         for t in range(self.number_of_stages - 1):
             for n in self.states:
                 for x in self.decisions:
@@ -154,10 +168,11 @@ class StochasticDP(object):
                         for nn in self.states
                         if self.probability[nn, n, t, x]
                     )
+
                     if isclose(sum_probability, 1):
-                        try:
+                        if allowable_decisions[t, n]:
                             allowable_decisions[t, n].append(x)
-                        except KeyError:
+                        else:
                             allowable_decisions[t, n] = [x]
                     elif isclose(sum_probability, 0, abs_tol=1e-09):
                         pass
@@ -171,37 +186,55 @@ class StochasticDP(object):
 
         # Value function
         # value[t, n]
-        value = ValueToGoData(self.number_of_stages, self.states)
+        value = StageStateData(self.number_of_stages, self.states)
 
         # Policy
         # policy[t, n]
-        policy = ValueToGoData(self.number_of_stages, self.states)
+        policy = StageStateData(self.number_of_stages, self.states)
 
         # Boundary conditions
+        # Validate the boundary conditions: make sure they are all defined
         for n in self.states:
-            value[self.number_of_stages - 1, n] = self.boundary[n]
+            if self.boundary[n] is None:
+                raise ValueError(
+                    "Dynamic program is not well-defined. "
+                    "Check the boundary condition for state {0}"
+                    .format(n)
+                )
+            else:
+                value[self.number_of_stages - 1, n] = self.boundary[n]
 
         # Solve backwards
         for t in range(self.number_of_stages - 2, -1, -1):
             for n in self.states:
-                value_decision = {}
-                for x in allowable_decisions[t, n]:
-                    value_decision[x] = sum(
-                        self.probability[nn, n, t, x] *
-                        (self.contribution[nn, n, t, x] +
-                         value[t + 1, nn])
-                        for nn in self.states
-                        if self.probability[nn, n, t, x]
+
+                if allowable_decisions[t, n]:
+                    value_decision = {}
+                    for x in allowable_decisions[t, n]:
+                        value_decision[x] = sum(
+                            self.probability[nn, n, t, x] *
+                            (self.contribution[nn, n, t, x] +
+                             value[t + 1, nn])
+                            for nn in self.states
+                            if self.probability[nn, n, t, x]
+                        )
+
+                    if self.minimize:
+                        value[t, n] = min(value_decision.values())
+                    else:
+                        value[t, n] = max(value_decision.values())
+
+                    policy[t, n] = set(
+                        x for x in allowable_decisions[t, n]
+                        if isclose(value_decision[x], value[t, n])
                     )
 
-                if self.minimize:
-                    value[t, n] = min(value_decision.values())
                 else:
-                    value[t, n] = max(value_decision.values())
+                    if self.minimize:
+                        value[t, n] = +inf
+                    else:
+                        value[t, n] = -inf
 
-                policy[t, n] = set(
-                    x for x in allowable_decisions[t, n]
-                    if isclose(value_decision[x], value[t, n])
-                )
+                    policy[t, n] = None
 
         return value, policy
