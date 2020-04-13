@@ -40,7 +40,7 @@ You can use the following helper functions to populate these dictionaries:
 dp.add_transition(stage=t, from_state=n, decision=x, to_state=m, probability=p, contribution=c)
 
 # This sets dp.boundary[n] = v
-dp.boundary(state=n, value=v)
+dp.add_boundary(state=n, value=v)
 ```
 
 To solve the stochastic dynamic program:
